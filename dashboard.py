@@ -36,7 +36,6 @@ st.markdown("""
     }
     h1 { color: #58a6ff !important; }
     h2, h3 { color: #c9d1d9 !important; }
-</style>
 """, unsafe_allow_html=True)
 
 CSV_FILE = 'misure.csv'
@@ -48,10 +47,14 @@ def carica_dati():
     df = pd.read_csv(CSV_FILE)
     df['valore'] = pd.to_numeric(df['valore'], errors='coerce')
     df['data_ora'] = pd.to_datetime(df['data_ora'], errors='coerce')
+    
+    # 🔥 MODIFICA SOLO QUI: CO2 → LUCE
+    df['sensore'] = df['sensore'].replace('CO2', 'Luce')
+    
     return df.dropna(subset=['valore'])
 
 st.title("🌿 EcoMonitor Dashboard")
-st.caption("Sistema di monitoraggio ambientale — Classe 4A ITIS Informatica")
+st.caption("Sistema di monitoraggio ambientale — Classe 4E ITIS Informatica")
 
 df_originale = carica_dati()
 
