@@ -2,7 +2,7 @@
 
 **Sistema di monitoraggio ambientale basato su architettura client-server in Python**
 
-> Progetto UDA Sostenibilità Ambientale — Classe 4A ITIS Informatica  
+> Progetto UDA Sostenibilità Ambientale — Classe 4E ITIS Informatica  
 > **Gruppo:** Awan Ali Atta, Singh Gurpreet, Cristiano Sofia
 
 ---
