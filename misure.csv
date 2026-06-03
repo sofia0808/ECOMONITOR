@@ -1,3 +1,10 @@
 studente,sensore,valore,luogo,data_ora
-Sofia,CO2,420,classe,2026-05-19 10:00:00
-Marco,CO2,430,lab,2026-05-19 10:05:00
+Singh,luce,178.0,Laboratorio,2026-06-03 09:13:01
+Singh,luce,174.0,Laboratorio,2026-06-03 09:13:11
+Singh,luce,173.0,Laboratorio,2026-06-03 09:13:20
+Singh,luce,172.0,Laboratorio,2026-06-03 09:13:28
+Singh,rumore,-29.694628,Laboratorio,2026-06-03 09:14:23
+Singh,rumore,-35.193676,Laboratorio,2026-06-03 09:14:27
+Singh,rumore,-30.901317,Laboratorio,2026-06-03 09:14:30
+Singh,rumore,-25.663266,Laboratorio,2026-06-03 09:14:33
+Singh,rumore,-16.0,Laboratorio,2026-06-03 09:16:04
