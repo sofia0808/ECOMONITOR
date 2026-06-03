@@ -1,166 +1,116 @@
 import socket
 import threading
-import queue
 import csv
 import os
 from datetime import datetime
- 
-HOST='0.0.0.0'
-PORT=5000
-CSV_FILE='misure.csv'
- 
-coda=queue.Queue()
-lock=threading.Lock()
-coda_visibile=[]
- 
-def inizializza_csv():
+from queue import Queue
+
+HOST = "0.0.0.0"
+PORT = 5000
+CSV_FILE = "misure.csv"
+
+lock = threading.Lock()
+client_queue = Queue()
+
+def init_csv():
     if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE,'w',newline='',encoding='utf-8') as f:
-            writer=csv.writer(f)
-            writer.writerow([
-                'studente',
-                'sensore',
-                'valore',
-                'luogo',
-                'data_ora'
-            ])
- 
-def salva_csv(riga):
-    with open(CSV_FILE,'a',newline='',encoding='utf-8') as f:
-        writer=csv.writer(f)
-        writer.writerow(riga)
- 
-def gestisci_client(conn,addr):
+        with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["studente", "sensore", "valore", "luogo", "data_ora"])
+
+def salva(riga):
+    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(riga)
+
+def recv_line(conn):
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = conn.recv(1)
+        if not chunk:
+            return None
+        data += chunk
+    return data.decode().strip()
+
+def handle_client(conn, addr):
     print(f"[CONNESSO] {addr}")
- 
     try:
-        conn.sendall(
-            b"Benvenuto in EcoMonitor!\nInserisci il tuo nome: "
-        )
- 
-        studente=conn.recv(1024).decode().strip()
- 
-        conn.sendall(
-            f"Ciao {studente}! Comandi: INVIA | CODA | ESCI\n".encode()
-        )
- 
+        conn.sendall(b"Nome studente:\n")
+        studente = recv_line(conn)
+        if not studente:
+            return
+
+        conn.sendall(b"OK. Comandi: INVIA | RAPIDA | ESCI\n")
+
         while True:
-            cmd=conn.recv(1024).decode().strip().upper()
- 
-            if not cmd:
+            cmd = recv_line(conn)
+            if cmd is None:
                 break
- 
-            if cmd=="ESCI":
-                conn.sendall(b"Connessione chiusa.\n")
+
+            cmd = cmd.upper()
+
+            if cmd == "ESCI":
+                conn.sendall(b"BYE\n")
                 break
- 
-            elif cmd=="CODA":
-                with lock:
-                    if coda_visibile:
-                        stato="\n".join(
-                            f"[{i+1}] {r}"
-                            for i,r in enumerate(coda_visibile)
-                        )
-                        risposta=f"Coda attuale:\n{stato}\n"
-                    else:
-                        risposta="La coda e' vuota.\n"
- 
-                conn.sendall(risposta.encode())
- 
-            elif cmd=="INVIA":
-                conn.sendall(
-                    b"Formato: sensore|valore|luogo\n"
-                )
- 
-                dati=conn.recv(1024).decode().strip()
- 
-                try:
-                    sensore,valore,luogo=dati.split("|")
-                    valore=float(valore)
- 
-                except:
-                    conn.sendall(
-                        b"Errore formato dati.\n"
-                    )
+
+            # Gestisce sia INVIA che il comando immediato OK della modalità rapida
+            elif cmd == "INVIA" or cmd == "OK":
+                conn.sendall(b"INSERISCI: sensore|valore|luogo\n")
+
+                dati = recv_line(conn)
+                if not dati:
                     continue
- 
-                data_ora=datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
- 
-                riga=[
-                    studente,
-                    sensore,
-                    valore,
-                    luogo,
-                    data_ora
-                ]
- 
-                record=",".join(map(str,riga))
- 
-                coda.put(record)
- 
+
+                try:
+                    sensore, valore, luogo = dati.split("|")
+                    valore = float(valore)
+                except Exception:
+                    conn.sendall(b"ERRORE FORMATO\n")
+                    continue
+
+                ora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                riga = [studente, sensore, valore, luogo, ora]
+
                 with lock:
-                    coda_visibile.append(record)
- 
-                salva_csv(riga)
- 
-                coda.get()
- 
-                with lock:
-                    if record in coda_visibile:
-                        coda_visibile.remove(record)
- 
-                risposta=f"Dato salvato! {data_ora}\n"
- 
-                conn.sendall(risposta.encode())
- 
-                print(f"[SALVATO] {record}")
- 
+                    salva(riga)
+
+                conn.sendall(f"SALVATO {ora}\n".encode())
+                print("[SALVATO]", riga)
+
             else:
-                conn.sendall(
-                    b"Comando non valido.\n"
-                )
- 
+                conn.sendall(b"COMANDO NON VALIDO\n")
+
     except Exception as e:
-        print(f"[ERRORE] {addr} -> {e}")
- 
+        print("[ERRORE]", e)
     finally:
         conn.close()
         print(f"[DISCONNESSO] {addr}")
- 
-def avvia_server():
-    inizializza_csv()
- 
-    server=socket.socket(
-        socket.AF_INET,
-        socket.SOCK_STREAM
-    )
- 
-    server.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_REUSEADDR,
-        1
-    )
- 
-    server.bind((HOST,PORT))
-    server.listen(10)
- 
-    print(f"[SERVER AVVIATO] {HOST}:{PORT}")
- 
+
+def worker():
     while True:
-        conn,addr=server.accept()
- 
-        thread=threading.Thread(
-            target=gestisci_client,
-            args=(conn,addr)
-        )
- 
-        thread.start()
- 
-        print(
-            f"[THREAD ATTIVI] {threading.active_count()-1}"
-        )
- 
-if __name__=="__main__":
-    avvia_server()
+        conn, addr = client_queue.get()
+        try:
+            handle_client(conn, addr)
+        finally:
+            client_queue.task_done()
+
+def main():
+    init_csv()
+
+    # Avvio dei thread worker
+    NUM_WORKERS = 5
+    for _ in range(NUM_WORKERS):
+        threading.Thread(target=worker, daemon=True).start()
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
+    server.listen()
+
+    print(f"[SERVER AVVIATO] {PORT}")
+
+    while True:
+        conn, addr = server.accept()
+        client_queue.put((conn, addr))
+
+if __name__ == "__main__":
+    main()
