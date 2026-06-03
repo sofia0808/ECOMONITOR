@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import os
 from datetime import datetime
 
@@ -36,9 +35,30 @@ st.markdown("""
     }
     h1 { color: #58a6ff !important; }
     h2, h3 { color: #c9d1d9 !important; }
+</style>
 """, unsafe_allow_html=True)
 
 CSV_FILE = 'misure.csv'
+
+# Unità di misura per sensore
+UNITA = {
+    'luce': 'lux',
+    'rumore': 'dB',
+}
+
+def get_unita(sensore):
+    return UNITA.get(str(sensore).lower(), '')
+
+def filtra_valori(df):
+    """Rimuove valori negativi e zero per i sensori che non li ammettono."""
+    df = df.copy()
+    # La luce non può essere negativa
+    mask_luce = (df['sensore'].str.lower() == 'luce') & (df['valore'] < 0)
+    # Il rumore in dB può essere negativo in teoria, ma phyphox restituisce
+    # valori assoluti di ampiezza >= 0, quindi filtriamo anche quelli
+    mask_rumore = (df['sensore'].str.lower() == 'rumore') & (df['valore'] < 0)
+    df = df[~mask_luce & ~mask_rumore]
+    return df
 
 @st.cache_data(ttl=10)
 def carica_dati():
@@ -47,11 +67,18 @@ def carica_dati():
     df = pd.read_csv(CSV_FILE)
     df['valore'] = pd.to_numeric(df['valore'], errors='coerce')
     df['data_ora'] = pd.to_datetime(df['data_ora'], errors='coerce')
-    
-    # 🔥 MODIFICA SOLO QUI: CO2 → LUCE
-    df['sensore'] = df['sensore'].replace('CO2', 'Luce')
-    
-    return df.dropna(subset=['valore'])
+    df['sensore'] = df['sensore'].str.lower().str.strip()
+    df = df.dropna(subset=['valore'])
+    df = filtra_valori(df)
+    return df
+
+
+def etichetta_valore(val, sensore):
+    u = get_unita(sensore)
+    if sensore == 'rumore':
+        return f"{val:.1f} {u}"
+    return f"{int(round(val))} {u}"
+
 
 st.title("🌿 EcoMonitor Dashboard")
 st.caption("Sistema di monitoraggio ambientale — Classe 4E ITIS Informatica")
@@ -59,7 +86,6 @@ st.caption("Sistema di monitoraggio ambientale — Classe 4E ITIS Informatica")
 df_originale = carica_dati()
 
 with st.sidebar:
-    st.image("https://img.shields.io/badge/EcoMonitor-v2.0-green", use_column_width=False)
     st.markdown("---")
     st.subheader("🔍 Filtri")
 
@@ -86,6 +112,9 @@ if luogo_sel != 'Tutti':
 if studente_sel != 'Tutti':
     df = df[df['studente'] == studente_sel]
 
+# Unità da mostrare nei metric (mista se più sensori)
+unita_corrente = get_unita(sensore_sel) if sensore_sel != 'Tutti' else '—'
+
 st.markdown("### 📊 Riepilogo generale")
 col1, col2, col3, col4 = st.columns(4)
 
@@ -97,8 +126,9 @@ with col1:
 
 with col2:
     media = df['valore'].mean() if not df.empty else 0
+    media_str = f"{media:.1f} {unita_corrente}" if sensore_sel != 'Tutti' else f"{media:.2f}"
     st.markdown(f"""<div class="metric-card">
-        <div class="metric-value">{media:.2f}</div>
+        <div class="metric-value">{media_str}</div>
         <div class="metric-label">Valore medio</div>
     </div>""", unsafe_allow_html=True)
 
@@ -118,27 +148,50 @@ with col4:
 
 st.markdown("---")
 
+COLORS = ['#58a6ff', '#3fb950', '#f78166', '#d2a8ff', '#ffa657']
+
 if df.empty:
     st.warning("⚠️ Nessun dato trovato con i filtri selezionati.")
 else:
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
-        st.markdown("#### 📍 Misure per luogo")
+        st.markdown("#### 📍 Media per luogo")
         fig, ax = plt.subplots(figsize=(7, 4))
         fig.patch.set_facecolor('#21262d')
         ax.set_facecolor('#161b22')
-        media_luogo = df.groupby('luogo')['valore'].mean().sort_values(ascending=False)
-        colors = ['#58a6ff', '#3fb950', '#f78166', '#d2a8ff', '#ffa657']
-        bars = ax.bar(media_luogo.index, media_luogo.values,
-                      color=colors[:len(media_luogo)], edgecolor='none', width=0.6)
-        ax.set_ylabel('Valore medio', color='#8b949e')
+
+        # Separiamo i sensori se sono entrambi presenti (scale diverse)
+        if sensore_sel == 'Tutti' and df['sensore'].nunique() > 1:
+            for i, s in enumerate(sorted(df['sensore'].unique())):
+                df_s = df[df['sensore'] == s]
+                media_l = df_s.groupby('luogo')['valore'].mean().sort_values(ascending=False)
+                u = get_unita(s)
+                ax.bar(
+                    [f"{loc}\n({s})" for loc in media_l.index],
+                    media_l.values,
+                    color=COLORS[i], edgecolor='none', width=0.5,
+                    label=f"{s} ({u})"
+                )
+            ax.legend(facecolor='#21262d', edgecolor='#30363d', labelcolor='#c9d1d9', fontsize=9)
+            ax.set_ylabel('Valore medio', color='#8b949e')
+        else:
+            u = get_unita(sensore_sel) if sensore_sel != 'Tutti' else ''
+            media_luogo = df.groupby('luogo')['valore'].mean().sort_values(ascending=False)
+            bars = ax.bar(media_luogo.index, media_luogo.values,
+                          color=COLORS[:len(media_luogo)], edgecolor='none', width=0.6)
+            ax.set_ylabel(f'Valore medio ({u})' if u else 'Valore medio', color='#8b949e')
+            # Etichette sopra le barre
+            for bar, val in zip(bars, media_luogo.values):
+                ax.text(bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + max(media_luogo.values) * 0.02,
+                        f"{val:.1f} {u}",
+                        ha='center', va='bottom', color='#c9d1d9', fontsize=9)
+
+        ax.set_ylim(bottom=0)   # ← niente valori negativi sull'asse Y
         ax.tick_params(colors='#8b949e')
         ax.spines[['top', 'right', 'left', 'bottom']].set_visible(False)
-        for bar, val in zip(bars, media_luogo.values):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-                    f'{val:.1f}', ha='center', va='bottom', color='#c9d1d9', fontsize=10)
-        plt.xticks(rotation=20, ha='right')
+        plt.xticks(rotation=20, ha='right', color='#8b949e')
         st.pyplot(fig)
         plt.close()
 
@@ -152,29 +205,29 @@ else:
         ax.barh(count_studente.index, count_studente.values,
                 color=colors_s[:len(count_studente)], edgecolor='none', height=0.5)
         ax.set_xlabel('Numero di misure', color='#8b949e')
+        ax.set_xlim(left=0)
         ax.tick_params(colors='#8b949e')
         ax.spines[['top', 'right', 'left', 'bottom']].set_visible(False)
-        for i, (idx, val) in enumerate(count_studente.items()):
+        for i, (_, val) in enumerate(count_studente.items()):
             ax.text(val + 0.1, i, str(val), va='center', color='#c9d1d9', fontsize=10)
         st.pyplot(fig)
         plt.close()
 
     st.markdown("---")
-
     col_g3, col_g4 = st.columns(2)
 
     with col_g3:
-        st.markdown("#### 🔬 Media per sensore")
+        st.markdown("#### 🔬 Distribuzione misure per sensore")
         fig, ax = plt.subplots(figsize=(7, 4))
         fig.patch.set_facecolor('#21262d')
         ax.set_facecolor('#161b22')
-        media_sensore = df.groupby('sensore')['valore'].mean()
+        conteggio_sensore = df.groupby('sensore').size()
         wedge_colors = ['#58a6ff', '#3fb950', '#ffa657', '#f78166']
         wedges, texts, autotexts = ax.pie(
-            media_sensore.values,
-            labels=media_sensore.index,
+            conteggio_sensore.values,
+            labels=[f"{s} ({get_unita(s)})" for s in conteggio_sensore.index],
             autopct='%1.1f%%',
-            colors=wedge_colors[:len(media_sensore)],
+            colors=wedge_colors[:len(conteggio_sensore)],
             startangle=90,
             textprops={'color': '#c9d1d9'}
         )
@@ -191,23 +244,28 @@ else:
         ax.set_facecolor('#161b22')
 
         if sensore_sel == 'Tutti' and df['sensore'].nunique() > 1:
-            for i, sensore in enumerate(df['sensore'].unique()):
-                df_s = df[df['sensore'] == sensore]
+            for i, s in enumerate(sorted(df['sensore'].unique())):
+                df_s = df[df['sensore'] == s]
                 media_l = df_s.groupby('luogo')['valore'].mean().sort_values(ascending=False)
+                u = get_unita(s)
                 ax.plot(media_l.index, media_l.values, marker='o',
-                        label=sensore, color=colors[i], linewidth=2)
-            ax.legend(facecolor='#21262d', edgecolor='#30363d', labelcolor='#c9d1d9')
+                        label=f"{s} ({u})", color=COLORS[i], linewidth=2)
+            ax.legend(facecolor='#21262d', edgecolor='#30363d', labelcolor='#c9d1d9', fontsize=9)
+            ax.set_ylabel('Valore medio', color='#8b949e')
         else:
+            u = get_unita(sensore_sel) if sensore_sel != 'Tutti' else ''
             media_l = df.groupby('luogo')['valore'].mean().sort_values(ascending=False)
             ax.plot(media_l.index, media_l.values, marker='o',
                     color='#58a6ff', linewidth=2, markersize=8)
             for x, y in zip(range(len(media_l)), media_l.values):
-                ax.text(x, y + 0.5, f'{y:.1f}', ha='center', color='#c9d1d9', fontsize=10)
+                ax.text(x, y + max(media_l.values) * 0.03,
+                        f"{y:.1f} {u}", ha='center', color='#c9d1d9', fontsize=9)
+            ax.set_ylabel(f'Valore medio ({u})' if u else 'Valore medio', color='#8b949e')
 
-        ax.set_ylabel('Valore medio', color='#8b949e')
+        ax.set_ylim(bottom=0)   # ← niente valori negativi sull'asse Y
         ax.tick_params(colors='#8b949e')
         ax.spines[['top', 'right', 'left', 'bottom']].set_visible(False)
-        plt.xticks(rotation=20, ha='right')
+        plt.xticks(rotation=20, ha='right', color='#8b949e')
         st.pyplot(fig)
         plt.close()
 
@@ -215,6 +273,7 @@ else:
     st.markdown("### 📋 Statistiche per sensore")
     stats = df.groupby('sensore')['valore'].agg(['mean', 'min', 'max', 'count'])
     stats.columns = ['Media', 'Minimo', 'Massimo', 'Misure']
+    stats.index = [f"{s} ({get_unita(s)})" for s in stats.index]
     stats = stats.round(3)
     st.dataframe(stats, use_container_width=True)
 
@@ -222,6 +281,7 @@ else:
     st.markdown("### 📄 Tabella completa dei dati")
     df_display = df.copy()
     df_display['data_ora'] = df_display['data_ora'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    df_display['unità'] = df_display['sensore'].apply(get_unita)
     st.dataframe(df_display, use_container_width=True, height=300)
 
     csv_export = df.to_csv(index=False).encode('utf-8')
@@ -233,4 +293,4 @@ else:
     )
 
 st.markdown("---")
-st.caption("EcoMonitor v2.0 — Gruppo: Awan Ali Atta, Singh Gurtjpreet, Cristiano Sofia — Classe 4E ITIS Informatica")
+st.caption("EcoMonitor v2.0 — Gruppo: Awan Ali Atta, Singh Gurpreet, Cristiano Sofia — Classe 4E ITIS Informatica")
