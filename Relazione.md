@@ -1,7 +1,7 @@
 # EcoMonitor — Relazione tecnica
 
 **Gruppo:** Awan Ali Atta, Singh Gurtjpreet, Cristiano Sofia  
-**Classe:** 4A ITIS Informatica  
+**Classe:** 4E ITIS Informatica  
 **Data:** Maggio 2026
 
 ---
